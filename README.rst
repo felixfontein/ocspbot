@@ -12,6 +12,9 @@ will attempt to obtain OCSP responses for certificates for whichh
 The criteria for “expiring soon enough” can be defined in the
 configuration.
 
+To install, use ``pip install ocspbot``. If you want a one-file version,
+please rename ``ocspbot/__main__.py`` to ``ocspbot.py`` and use that one.
+
 
 Command Line Interface
 ----------------------
