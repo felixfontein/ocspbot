@@ -16,6 +16,13 @@ To install, use ``pip install ocspbot``. If you want a one-file version,
 please rename ``ocspbot/__main__.py`` to ``ocspbot.py`` and use that one.
 
 
+Requirements
+------------
+
+OCSP Bot needs `pyyaml <http://pyyaml.org/>`__ and `OpenSSL <https://www.openssl.org/>`__.
+It has been tested with OpenSSL 1.0.x, but not yet with OpenSSL 0.9.x and 1.1.x.
+
+
 Command Line Interface
 ----------------------
 
