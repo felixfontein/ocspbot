@@ -107,6 +107,7 @@ They can contain the following keys:
 
   The dictionary maps a domain identifier to a dictionary with the
   following entries:
+
   - ``cert``: ``<string>``
   - ``chain``: ``<string>``
   - ``rootchain``: ``<string>``
