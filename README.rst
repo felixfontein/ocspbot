@@ -5,7 +5,8 @@ The OCSP Bot's job is to make sure up-to-date OCSP responses are kept
 for a set of certificates.
 
 The bot should be run as a cronjob regularly (like, once per hour) and
-will attempt to obtain OCSP responses for certificates for whichh
+will attempt to obtain OCSP responses for certificates for which
+
 - no valid OCSP response is currently stored, and
 - the existing OCSP response is expiring soon enough.
 
