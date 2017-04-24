@@ -44,7 +44,7 @@ try:
 except NameError:
     FileNotFoundError = IOError
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 
 def _run_openssl(args, executable='openssl', input=None, return_stderr_and_returncode=False):
