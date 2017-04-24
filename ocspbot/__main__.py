@@ -162,7 +162,7 @@ def _get_date_middle(date_a, date_b, position=0.5):
 
 def _read(filename):
     """Read content of file."""
-    with open(filename, "r") as f:
+    with open(filename, "rb") as f:
         return f.read()
 
 
