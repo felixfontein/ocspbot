@@ -44,7 +44,7 @@ try:
 except NameError:
     FileNotFoundError = IOError
 
-VERSION = "0.9.1"
+VERSION = "0.9.2"
 
 _DEFAULT_OPENSSL_EXECUTABLE_NAME = 'openssl'
 _DEFAULT_OPENSSL_VERSION = (1, 0, 1, 'a')
