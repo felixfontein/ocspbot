@@ -46,8 +46,11 @@ except NameError:
 
 VERSION = "0.9.1"
 
+_DEFAULT_OPENSSL_EXECUTABLE_NAME = 'openssl'
+_DEFAULT_OPENSSL_VERSION = (1, 0, 1, 'a')
 
-def _run_openssl(args, executable='openssl', input=None, return_stderr_and_returncode=False):
+
+def _run_openssl(args, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, input=None, return_stderr_and_returncode=False):
     """Execute OpenSSL with the given arguments. Feeds input via stdin if given."""
     if input is None:
         proc = subprocess.Popen([executable] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -60,7 +63,15 @@ def _run_openssl(args, executable='openssl', input=None, return_stderr_and_retur
     return (out, err.decode('utf-8'), proc.returncode) if return_stderr_and_returncode else out
 
 
-def _get_ocsp_uri(cert, executable='openssl'):
+def _get_openssl_version(executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME):
+    version_string = _run_openssl(['version'], executable=executable).decode('utf-8')
+    m = re.match(r'^OpenSSL (\d+)\.(\d+)\.(\d+)([a-z]+)\s+', version_string)
+    if not m:
+        raise Exception("Cannot identify OpenSSL version from version string '{0}'!".format(version_string))
+    return (int(m[1]), int(m[2]), int(m[3]), m[4])
+
+
+def _get_ocsp_uri(cert, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Retrieve the OCSP URL from a certificate. Must be given as path on disk."""
     cert_data = _run_openssl(['x509', '-in', cert, '-text'], executable=executable).decode('utf-8')
     m = re.search('^\s*OCSP - URI:(.*)$', cert_data, flags=re.MULTILINE)
@@ -76,7 +87,7 @@ def _get_host_from_uri(uri):
     return netloc[:i] if i >= 0 else netloc
 
 
-def _get_ocsp_response(cert, chain, uri, output, executable='openssl'):
+def _get_ocsp_response(cert, chain, uri, output, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Retrieve the OCSP response for a given certificate.
 
     ``cert`` and ``chain`` must point to files on disk which contain the certificate
@@ -93,7 +104,7 @@ def _get_ocsp_response(cert, chain, uri, output, executable='openssl'):
         return True, None
 
 
-def _verify_ocsp_response(cert, chain, rootchain, output, executable='openssl'):
+def _verify_ocsp_response(cert, chain, rootchain, output, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Verify the OCSP response ``output`` on disk.
 
     ``cert`` and ``chain`` must point to files on disk which contain the certificate
@@ -126,7 +137,7 @@ def _parse_openssl_text_timestamp(text, timestamp_type='timestamp', data_name='d
         raise Exception('Cannot parse "{timestamp_type}" in {data_name}!'.format(data_name=data_name, timestamp_type=timestamp_type))
 
 
-def _parse_ocsp_response(output, executable='openssl'):
+def _parse_ocsp_response(output, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME):
     """Parse OCSP response.
 
     Returns a tuple ``(good, this_update, next_update)`` indicating
@@ -142,7 +153,7 @@ def _parse_ocsp_response(output, executable='openssl'):
     return cert_status == 'good', this_update, next_update
 
 
-def _parse_certificate(cert, executable='openssl'):
+def _parse_certificate(cert, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME):
     """Parse certificate for validity period.
 
     Returns tuple ``(not_before, not_after)`` indicating when the
@@ -176,7 +187,7 @@ def _default_warning_message(msg):
     sys.stderr.write('WARNING: {0}\n'.format(msg))
 
 
-def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output, min_validity=None, min_validity_pc=None, make_backups=False, output_message=_default_output_message, warning_message=_default_warning_message, executable='openssl'):
+def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output, min_validity=None, min_validity_pc=None, make_backups=False, output_message=_default_output_message, warning_message=_default_warning_message, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Get a new OCSP response for a certificate, if necessary.
 
     Returns ``True`` in case the OCSP response was updated, ``False`` in case
@@ -232,7 +243,7 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
         else:
             # It's good. Check validity.
             output_message('Current OSCP reponse is good from {valid_from} to {valid_to}.'.format(valid_from=ocsp_this_update, valid_to=ocsp_next_update))
-            valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output, executable=executable)
+            valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output, executable=executable, openssl_version=openssl_version)
             if not valid:
                 # It's not valid ==> get new one
                 output_message('Current OCSP response is NOT valid: {reason}'.format(reason=errormessage))
@@ -271,8 +282,8 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
 
     # Retrieve OCSP response
     output_temp = '{0}.new'.format(output)
-    uri = _get_ocsp_uri(cert, executable=executable)
-    success, errormessage = _get_ocsp_response(cert, chain, uri, output_temp, executable=executable)
+    uri = _get_ocsp_uri(cert, executable=executable, openssl_version=openssl_version)
+    success, errormessage = _get_ocsp_response(cert, chain, uri, output_temp, executable=executable, openssl_version=openssl_version)
     if not success:
         raise Exception('Cannot get new OCSP response: {reason}'.format(reason=errormessage))
     # Check whether response is good
@@ -281,7 +292,7 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
     if not ocsp_cert_good:
         raise Exception('New OCSP response is not good! (Stored as "{new}")'.format(new=output_temp))
     # Check whether response is valid
-    valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output_temp, executable=executable)
+    valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output_temp, executable=executable, openssl_version=openssl_version)
     if not valid:
         raise Exception('Got invalid new OCSP response: {reason} (Stored as "{new}")'.format(reason=errormessage, new=output_temp))
     # Compare files (if old response exists and is valid as well)
@@ -539,7 +550,7 @@ class OCSPRenewal(object):
         self.make_backups = self.raw_config.get('make_backups', False)
 
         # OpenSSL executable
-        self.openssl_executable = self.raw_config.get('openssl_executable', 'openssl')
+        self.openssl_executable = self.raw_config.get('openssl_executable', _DEFAULT_OPENSSL_EXECUTABLE_NAME)
 
         # Domains
         self.domains = {}
@@ -564,6 +575,10 @@ class OCSPRenewal(object):
                 self.warning('Cannot find include file "{0}"!'.format(include))
             except OSError as e:
                 raise Exception('Error while listing files in include "{0}". ({1})'.format(include, e))
+
+        # Determine OpenSSL version
+        self.openssl_version = _get_openssl_version(self.openssl_executable)
+        self.output('Detected OpenSSL version {0}.{1}.{2}{3}.'.format(*self.openssl_version))
 
     @staticmethod
     def _format_message(message, domain=None):
@@ -604,7 +619,8 @@ class OCSPRenewal(object):
                                                                    make_backups=self.make_backups,
                                                                    output_message=lambda msg: self.output(msg, domain=domain),
                                                                    warning_message=lambda msg: self.warning(msg, domain=domain),
-                                                                   executable=self.openssl_executable)
+                                                                   executable=self.openssl_executable,
+                                                                   openssl_version=self.openssl_version)
             return 'updated' if result else 'unchanged'
         except Exception as e:
             self.error(e, domain=domain)
