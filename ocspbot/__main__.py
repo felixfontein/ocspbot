@@ -48,6 +48,7 @@ VERSION = "0.9.1"
 
 _DEFAULT_OPENSSL_EXECUTABLE_NAME = 'openssl'
 _DEFAULT_OPENSSL_VERSION = (1, 0, 1, 'a')
+_OPENSSL_VERSION_1_1_0 = (1, 1, 0, '')
 
 
 def _run_openssl(args, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, input=None, return_stderr_and_returncode=False):
@@ -97,7 +98,11 @@ def _get_ocsp_response(cert, chain, uri, output, executable=_DEFAULT_OPENSSL_EXE
 
     The resulting OCSP response will be stored at ``output`` on disk.
     """
-    _, err, returncode = _run_openssl(['ocsp', '-no_nonce', '-header', 'Host', _get_host_from_uri(uri), '-issuer', chain, '-cert', cert, '-url', uri, '-noverify', '-respout', output], return_stderr_and_returncode=True, executable=executable)
+    if openssl_version < _OPENSSL_VERSION_1_1_0:
+        host_header = ['Host', _get_host_from_uri(uri)]
+    else:
+        host_header = ['Host=' + _get_host_from_uri(uri)]
+    _, err, returncode = _run_openssl(['ocsp', '-no_nonce', '-header'] + host_header + ['-issuer', chain, '-cert', cert, '-url', uri, '-noverify', '-respout', output], return_stderr_and_returncode=True, executable=executable)
     if returncode != 0:
         return False, err
     else:
