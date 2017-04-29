@@ -42,7 +42,7 @@ therein will be processed.
 OCSP Bot returns 0 for success (without changes), a positive return value
 for the number of OCSP responses renewed, and negative return values for
 errors:
-  
+
 +-------------+--------------------------------------------------------------------------------+
 | Return Code | Meaning                                                                        |
 +=============+================================================================================+
