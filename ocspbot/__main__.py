@@ -193,14 +193,15 @@ def _default_warning_message(msg):
 
 
 class CertInfo(object):
-    """Store paths of relevant files for a certificate."""
+    """Store paths of relevant files and OCSP responder URI for a certificate."""
 
     _cert = None
     _chain = None
     _rootchain = None
     _ocsp_response = None
+    _ocsp_responder_uri = None
 
-    def __init__(self, cert, chain, rootchain, ocsp_response):
+    def __init__(self, cert, chain, rootchain, ocsp_response, ocsp_responder_uri=None):
         """Create ``CertInfo`` instance.
 
         Create ``CertInfo`` instance out of a certificate filename
@@ -212,6 +213,7 @@ class CertInfo(object):
         self._chain = chain
         self._rootchain = rootchain
         self._ocsp_response = ocsp_response
+        self._ocsp_responder_uri = ocsp_responder_uri
 
     def cert(self):
         """Return certificate filename."""
@@ -228,6 +230,10 @@ class CertInfo(object):
     def ocsp_response(self):
         """Return OCSP response filename."""
         return self._ocsp_response
+
+    def ocsp_responder_uri(self):
+        """Return OCSP responser URI or None."""
+        return self._ocsp_responder_uri
 
 
 def conditional_get_ocsp_response_for_certificate(cert_info, min_validity=None, min_validity_pc=None, make_backups=False, output_message=_default_output_message, warning_message=_default_warning_message, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
@@ -322,7 +328,11 @@ def conditional_get_ocsp_response_for_certificate(cert_info, min_validity=None, 
 
     # Retrieve OCSP response
     output_temp = '{0}.new'.format(cert_info.ocsp_response())
-    uri = _get_ocsp_uri(cert_info.cert(), executable=executable, openssl_version=openssl_version)
+    if cert_info.ocsp_responder_uri() is not None:
+        uri = cert_info.ocsp_responder_uri()
+    else:
+        uri = _get_ocsp_uri(cert_info.cert(), executable=executable, openssl_version=openssl_version)
+    output_message('Using OCSP responder {uri}.'.format(uri=uri))
     success, errormessage = _get_ocsp_response(cert_info.cert(), cert_info.chain(), uri, output_temp, executable=executable, openssl_version=openssl_version)
     if not success:
         raise Exception('Cannot get new OCSP response: {reason}'.format(reason=errormessage))
@@ -450,8 +460,12 @@ class OCSPRenewal(object):
                     chain_file = os.path.join(dirpath, chain_mask.format(domain=domain))
                     rootchain_file = os.path.join(dirpath, rootchain_mask.format(domain=domain))
                     ocsp_file = os.path.relpath(os.path.join(dirpath, ocsp_mask.format(domain=domain)), folder)
-                    if os.path.exists(chain_file) and os.path.exists(rootchain_file):
-                        result[domain] = CertInfo(cert_file, chain_file, rootchain_file, os.path.join(self.ocsp_folder, ocsp_file))
+                    cert_info = CertInfo(cert_file, chain_file, rootchain_file, os.path.join(self.ocsp_folder, ocsp_file))
+                    if os.path.exists(cert_info.chain()) and os.path.exists(cert_info.rootchain()):
+                        if domain in result:
+                            raise Exception('Domain identifier "{0}" appears more than once while {2}scanning folder "{1}"!'
+                                            .format(domain, folder, 'recursively ' if recursive else ''))
+                        result[domain] = cert_info
             if not recursive:
                 break
         return result
@@ -512,15 +526,20 @@ class OCSPRenewal(object):
         def add_domain(domain, cert_info):
             """Add domain data to configuration."""
             if domain in self.domains:
-                raise Exception('Domain identifier "{0}" appears more than once!'.format(domain))
+                raise Exception('Domain identifier "{0}" appears more than once!'
+                                .format(domain))
             if not os.path.isfile(cert_info.cert()):
-                raise Exception('Cannot find certificate chain "{0}" for domain "{1}"!'.format(cert_info.cert(), domain))
+                raise Exception('Cannot find certificate chain "{0}" for domain "{1}"!'
+                                .format(cert_info.cert(), domain))
             if not os.path.isfile(cert_info.chain()):
-                raise Exception('Cannot find certificate chain file "{0}" for domain "{1}"!'.format(cert_info.chain(), domain))
+                raise Exception('Cannot find certificate chain file "{0}" for domain "{1}"!'
+                                .format(cert_info.chain(), domain))
             if not os.path.isfile(cert_info.rootchain()):
-                raise Exception('Cannot find certificate root chain file "{0}" for domain "{1}"!'.format(cert_info.rootchain(), domain))
+                raise Exception('Cannot find certificate root chain file "{0}" for domain "{1}"!'
+                                .format(cert_info.rootchain(), domain))
             if not os.path.isfile(cert_info.ocsp_response()) and os.path.exists(cert_info.ocsp_response()):
-                raise Exception('OCSP response file "{0}" for domain "{1}" exists, but is not a file!'.format(cert_info.ocsp_response(), domain))
+                raise Exception('OCSP response file "{0}" for domain "{1}" exists, but is not a file!'
+                                .format(cert_info.ocsp_response(), domain))
             # Insert
             self.domains[domain] = cert_info
 
@@ -532,7 +551,9 @@ class OCSPRenewal(object):
             scan_key_chain_mask = scan_key_data.get('chain_mask', '{domain}-chain.pem')
             scan_key_rootchain_mask = scan_key_data.get('rootchain_mask', '{domain}-rootchain.pem')
             scan_key_ocsp_mask = scan_key_data.get('ocsp_mask', '{domain}.ocsp-resp')
-            for domain, cert_info in self._scan_certs(scan_key_folder, scan_key_cert_mask, scan_key_chain_mask, scan_key_rootchain_mask, scan_key_ocsp_mask, recursive=scan_key_recursive).items():
+            for domain, cert_info in self._scan_certs(scan_key_folder, scan_key_cert_mask, scan_key_chain_mask,
+                                                      scan_key_rootchain_mask, scan_key_ocsp_mask,
+                                                      recursive=scan_key_recursive).items():
                 add_domain(domain, cert_info)
 
         # Explicitly listed certificates
@@ -545,7 +566,14 @@ class OCSPRenewal(object):
                 raise Exception('Explicit domain "{0}" does not contain "rootchain" record!'.format(domain))
             if 'ocsp' not in data:
                 raise Exception('Explicit domain "{0}" does not contain "ocsp" record!'.format(domain))
-            add_domain(domain, CertInfo(data['cert'], data['chain'], data['rootchain'], os.path.join(self.ocsp_folder, data['ocsp'])))
+            ocsp_responder_uri = None
+            if 'ocsp_responder_uri' in data:
+                ocsp_responder_uri = data['ocsp_responder_uri']
+                if ocsp_responder_uri == 'certificate':
+                    ocsp_responder_uri = None
+            add_domain(domain, CertInfo(data['cert'], data['chain'], data['rootchain'],
+                                        os.path.join(self.ocsp_folder, data['ocsp']),
+                                        ocsp_responder_uri=ocsp_responder_uri))
 
     def parse(self):
         """Completely parse the configuration.

@@ -121,23 +121,32 @@ They can contain the following keys:
   following entries:
 
   - ``cert``: ``<string>``
+
+    The path to the certificate file. Will be interpreted relative
+    to the current working directory. Must always be specified.
   - ``chain``: ``<string>``
+
+    The path to the certificate's chain file. The chain must neither
+    contain the certificate itself nor the root certificate. Will be
+    interpreted relative to the current working directory. Must
+    always be specified.
   - ``rootchain``: ``<string>``
+
+    The path to the certificate's root chain file. The root chain
+    must not include the certificate itself, but it must include
+    the root certificate. Will be interpreted relative
+    to the current working directory. Must always be specified.
   - ``ocsp``: ``<string>``
 
-  The domain identifier will be used in the output messages.
+    The path to the OCSP response file. Will be interpreted relative
+    to ``ocsp_folder``. Must always be specified.
+  - ``ocsp_responder_uri``: ``<string>``
 
-  The strings in the inner dictionaries must be paths specifying:
+    The URI of the OCSP responder for this certificate. Can be left
+    away or set to the special value ``certificate`` to extract the
+    URL from the certificate.
 
-  - The certificate;
-  - The certificate's chain (excluding the certificate itself and
-    the root);
-  - The certificate's root chain (i.e. the chain excluding the
-    certificate itself, but including the root);
-  - The OCSP response.
-
-  The paths are relative to the current working directory, except
-  for the OCSP response, where the paths are relative to ``ocsp_folder``.
+  The domain identifier will only be used in the output messages.
 
 - ``scan_keys``: ``<list>``
 
