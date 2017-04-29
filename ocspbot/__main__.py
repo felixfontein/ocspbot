@@ -192,17 +192,52 @@ def _default_warning_message(msg):
     sys.stderr.write('WARNING: {0}\n'.format(msg))
 
 
-def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output, min_validity=None, min_validity_pc=None, make_backups=False, output_message=_default_output_message, warning_message=_default_warning_message, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
+class CertInfo(object):
+    """Store paths of relevant files for a certificate."""
+
+    _cert = None
+    _chain = None
+    _rootchain = None
+    _ocsp_response = None
+
+    def __init__(self, cert, chain, rootchain, ocsp_response):
+        """Create ``CertInfo`` instance.
+
+        Create ``CertInfo`` instance out of a certificate filename
+        (``cert``), the certificate chain filename (``chain``),
+        the certificate root chain filename (``rootchain``) and
+        the OCSP response filename (``ocsp_response``).
+        """
+        self._cert = cert
+        self._chain = chain
+        self._rootchain = rootchain
+        self._ocsp_response = ocsp_response
+
+    def cert(self):
+        """Return certificate filename."""
+        return self._cert
+
+    def chain(self):
+        """Return certificate chain filename."""
+        return self._chain
+
+    def rootchain(self):
+        """Return certificate root chain filename."""
+        return self._rootchain
+
+    def ocsp_response(self):
+        """Return OCSP response filename."""
+        return self._ocsp_response
+
+
+def conditional_get_ocsp_response_for_certificate(cert_info, min_validity=None, min_validity_pc=None, make_backups=False, output_message=_default_output_message, warning_message=_default_warning_message, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Get a new OCSP response for a certificate, if necessary.
 
     Returns ``True`` in case the OCSP response was updated, ``False`` in case
     it was not, and raises an exception in case of errors.
 
-    ``cert``, ``chain`` and ``rootchain`` must be filenames of the certificate,
-    its chain and rootchain, respectively.
-
-    ``output`` must be the destination where the current and new OCSP responses
-    are stored on disk.
+    ``cert_info`` must be a ``CertInfo`` instance, specifying file names for
+    the certificate, its chain, root chain, and OCSP response to be updated.
 
     If ``min_validity`` is given, it must be a time delta. If the OCSP response is
     valid less than this time delta, a new OCSP response will be retrieved.
@@ -219,28 +254,28 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
     ``executable`` is the path to the OpenSSL executable.
     """
     # Check if everything's there
-    if not os.path.isfile(cert):
-        raise Exception('Cannot find certificate file "{cert}"!'.format(cert=cert))
-    if not os.path.isfile(chain):
-        raise Exception('Cannot find certificate chain file "{chain}"'.format(chain=chain))
-    if not os.path.isfile(rootchain):
-        raise Exception('Cannot find certificate rootchain file "{rootchain}""!'.format(rootchain=rootchain))
+    if not os.path.isfile(cert_info.cert()):
+        raise Exception('Cannot find certificate file "{cert}"!'.format(cert=cert_info.cert()))
+    if not os.path.isfile(cert_info.chain()):
+        raise Exception('Cannot find certificate chain file "{chain}"'.format(chain=cert_info.chain()))
+    if not os.path.isfile(cert_info.rootchain()):
+        raise Exception('Cannot find certificate root chain file "{rootchain}""!'.format(rootchain=cert_info.rootchain()))
 
     # Parse certificate
-    cert_not_before, cert_not_after = _parse_certificate(cert, executable=executable)
+    cert_not_before, cert_not_after = _parse_certificate(cert_info.cert(), executable=executable)
     output_message('Certificate is valid from {valid_from} to {valid_to}.'.format(valid_from=cert_not_before, valid_to=cert_not_after))
 
     # Check whether we need new OCSP response
     need_new_ocsp = False
     has_valid_ocsp = False
     ocsp_next_update = None
-    if not os.path.isfile(output):
+    if not os.path.isfile(cert_info.ocsp_response()):
         # Old response doesn't exist
         output_message('OCSP stapling response not found on disk.')
         need_new_ocsp = True
     else:
         # Old response exists. Check it!
-        ocsp_cert_good, ocsp_this_update, ocsp_next_update = _parse_ocsp_response(output, executable=executable)
+        ocsp_cert_good, ocsp_this_update, ocsp_next_update = _parse_ocsp_response(cert_info.ocsp_response(), executable=executable)
         if not ocsp_cert_good:
             # It's not good ==> get new one
             output_message('Current OSCP reponse is not good!')
@@ -248,7 +283,7 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
         else:
             # It's good. Check validity.
             output_message('Current OSCP reponse is good from {valid_from} to {valid_to}.'.format(valid_from=ocsp_this_update, valid_to=ocsp_next_update))
-            valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output, executable=executable, openssl_version=openssl_version)
+            valid, errormessage = _verify_ocsp_response(cert_info.cert(), cert_info.chain(), cert_info.rootchain(), cert_info.ocsp_response(), executable=executable, openssl_version=openssl_version)
             if not valid:
                 # It's not valid ==> get new one
                 output_message('Current OCSP response is NOT valid: {reason}'.format(reason=errormessage))
@@ -286,9 +321,9 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
         return False
 
     # Retrieve OCSP response
-    output_temp = '{0}.new'.format(output)
-    uri = _get_ocsp_uri(cert, executable=executable, openssl_version=openssl_version)
-    success, errormessage = _get_ocsp_response(cert, chain, uri, output_temp, executable=executable, openssl_version=openssl_version)
+    output_temp = '{0}.new'.format(cert_info.ocsp_response())
+    uri = _get_ocsp_uri(cert_info.cert(), executable=executable, openssl_version=openssl_version)
+    success, errormessage = _get_ocsp_response(cert_info.cert(), cert_info.chain(), uri, output_temp, executable=executable, openssl_version=openssl_version)
     if not success:
         raise Exception('Cannot get new OCSP response: {reason}'.format(reason=errormessage))
     # Check whether response is good
@@ -297,12 +332,12 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
     if not ocsp_cert_good:
         raise Exception('New OCSP response is not good! (Stored as "{new}")'.format(new=output_temp))
     # Check whether response is valid
-    valid, errormessage = _verify_ocsp_response(cert, chain, rootchain, output_temp, executable=executable, openssl_version=openssl_version)
+    valid, errormessage = _verify_ocsp_response(cert_info.cert(), cert_info.chain(), cert_info.rootchain(), output_temp, executable=executable, openssl_version=openssl_version)
     if not valid:
         raise Exception('Got invalid new OCSP response: {reason} (Stored as "{new}")'.format(reason=errormessage, new=output_temp))
     # Compare files (if old response exists and is valid as well)
     if has_valid_ocsp:
-        old = _read(output)
+        old = _read(cert_info.ocsp_response())
         new = _read(output_temp)
         if old == new:
             warning_message('New OCSP response\'s validity ({validity}) is not longer than the previous one\'s! (In fact, they are identical.)'.format(validity=new_ocsp_next_update))
@@ -310,18 +345,18 @@ def conditional_get_ocsp_response_for_certificate(cert, chain, rootchain, output
     # Make backup if requested
     if make_backups:
         now = datetime.datetime.now()
-        output_backup = '{0}-{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}'.format(output, year=now.year, month=now.month, day=now.day, hour=now.hour, minute=now.minute, second=now.second)
+        output_backup = '{0}-{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}'.format(cert_info.ocsp_response(), year=now.year, month=now.month, day=now.day, hour=now.hour, minute=now.minute, second=now.second)
         try:
             shutil.copyfile(output_temp, output_backup)
         except Exception as e:
             raise Exception('Cannot copy OCSP response "{0}" to "{1}"! ({2})'.format(output_temp, output_backup, e))
     # Move file to correct place
     try:
-        if os.path.exists(output):
-            os.remove(output)
-        os.rename(output_temp, output)
+        if os.path.exists(cert_info.ocsp_response()):
+            os.remove(cert_info.ocsp_response())
+        os.rename(output_temp, cert_info.ocsp_response())
     except Exception as e:
-        raise Exception('Cannot move OCSP response "{0}" to "{1}"! ({2})'.format(output_temp, output, e))
+        raise Exception('Cannot move OCSP response "{0}" to "{1}"! ({2})'.format(output_temp, cert_info.ocsp_response(), e))
     # Check whether response is valid longer
     if ocsp_next_update is not None:
         if new_ocsp_next_update <= ocsp_next_update:
@@ -392,8 +427,7 @@ class OCSPRenewal(object):
             except:
                 pass
 
-    @staticmethod
-    def _scan_certs(folder, cert_mask, chain_mask, rootchain_mask, ocsp_mask, recursive=True):
+    def _scan_certs(self, folder, cert_mask, chain_mask, rootchain_mask, ocsp_mask, recursive=True):
         """Search for certificates matching the given masks.
 
         ``folder`` specifies where to search, and ``recursive`` determines whether
@@ -401,9 +435,9 @@ class OCSPRenewal(object):
 
         ``cert_mask``, ``chain_mask``, ``rootchain_mask`` and ``ocsp_mask`` must be
         strings containing ``{domain}``. If files are found matching ``cert_mask``,
-        ``chain_mask`` and ``rootchain_mask`` for some domain string, a record is added
-        to the result for this domain string with ``ocsp_mask`` also adjusted
-        accordingly.
+        ``chain_mask`` and ``rootchain_mask`` for some domain string, a ``CertInfo``
+        instance is added to the result for this domain string with ``ocsp_mask``
+        also adjusted accordingly.
         """
         result = {}
         cert_mask_re = re.compile(re.escape(cert_mask).replace(r'\{domain\}', '(?P<domain>.+?)'))
@@ -417,12 +451,7 @@ class OCSPRenewal(object):
                     rootchain_file = os.path.join(dirpath, rootchain_mask.format(domain=domain))
                     ocsp_file = os.path.relpath(os.path.join(dirpath, ocsp_mask.format(domain=domain)), folder)
                     if os.path.exists(chain_file) and os.path.exists(rootchain_file):
-                        result[domain] = {
-                            'cert': cert_file,
-                            'chain': chain_file,
-                            'rootchain': rootchain_file,
-                            'ocsp': ocsp_file,
-                        }
+                        result[domain] = CertInfo(cert_file, chain_file, rootchain_file, os.path.join(self.ocsp_folder, ocsp_file))
             if not recursive:
                 break
         return result
@@ -480,21 +509,20 @@ class OCSPRenewal(object):
 
     def _parse_domains(self, raw_config):
         """Parse domains of raw config file."""
-        def add_domain(domain, data):
+        def add_domain(domain, cert_info):
             """Add domain data to configuration."""
             if domain in self.domains:
                 raise Exception('Domain identifier "{0}" appears more than once!'.format(domain))
-            if not os.path.isfile(data['cert']):
-                raise Exception('Cannot find certificate chain "{0}" for domain "{1}"!'.format(data['cert'], domain))
-            if not os.path.isfile(data['chain']):
-                raise Exception('Cannot find certificate chain file "{0}" for domain "{1}"!'.format(data['chain'], domain))
-            if not os.path.isfile(data['rootchain']):
-                raise Exception('Cannot find certificate root chain file "{0}" for domain "{1}"!'.format(data['rootchain'], domain))
-            ocsp_file = os.path.join(self.ocsp_folder, data['ocsp'])
-            if os.path.exists(ocsp_file) and not os.path.isfile(ocsp_file):
-                raise Exception('OCSP response file "{0}" for domain "{1}" exists, but is not a file!'.format(ocsp_file, domain))
+            if not os.path.isfile(cert_info.cert()):
+                raise Exception('Cannot find certificate chain "{0}" for domain "{1}"!'.format(cert_info.cert(), domain))
+            if not os.path.isfile(cert_info.chain()):
+                raise Exception('Cannot find certificate chain file "{0}" for domain "{1}"!'.format(cert_info.chain(), domain))
+            if not os.path.isfile(cert_info.rootchain()):
+                raise Exception('Cannot find certificate root chain file "{0}" for domain "{1}"!'.format(cert_info.rootchain(), domain))
+            if not os.path.isfile(cert_info.ocsp_response()) and os.path.exists(cert_info.ocsp_response()):
+                raise Exception('OCSP response file "{0}" for domain "{1}" exists, but is not a file!'.format(cert_info.ocsp_response(), domain))
             # Insert
-            self.domains[domain] = data
+            self.domains[domain] = cert_info
 
         # Scan for certificates
         for scan_key_data in raw_config.get('scan_keys', []):
@@ -504,8 +532,8 @@ class OCSPRenewal(object):
             scan_key_chain_mask = scan_key_data.get('chain_mask', '{domain}-chain.pem')
             scan_key_rootchain_mask = scan_key_data.get('rootchain_mask', '{domain}-rootchain.pem')
             scan_key_ocsp_mask = scan_key_data.get('ocsp_mask', '{domain}.ocsp-resp')
-            for domain, data in self._scan_certs(scan_key_folder, scan_key_cert_mask, scan_key_chain_mask, scan_key_rootchain_mask, scan_key_ocsp_mask, recursive=scan_key_recursive).items():
-                add_domain(domain, data)
+            for domain, cert_info in self._scan_certs(scan_key_folder, scan_key_cert_mask, scan_key_chain_mask, scan_key_rootchain_mask, scan_key_ocsp_mask, recursive=scan_key_recursive).items():
+                add_domain(domain, cert_info)
 
         # Explicitly listed certificates
         for domain, data in raw_config.get('domains', {}).items():
@@ -517,7 +545,7 @@ class OCSPRenewal(object):
                 raise Exception('Explicit domain "{0}" does not contain "rootchain" record!'.format(domain))
             if 'ocsp' not in data:
                 raise Exception('Explicit domain "{0}" does not contain "ocsp" record!'.format(domain))
-            add_domain(domain, data)
+            add_domain(domain, CertInfo(data['cert'], data['chain'], data['rootchain'], os.path.join(self.ocsp_folder, data['ocsp'])))
 
     def parse(self):
         """Completely parse the configuration.
@@ -615,11 +643,10 @@ class OCSPRenewal(object):
             self.output('ERROR: {0}'.format(exception), domain=domain)
         self.error_file.write(self._format_message('ERROR: {exception}'.format(exception=exception), domain) + '\n')
 
-    def _process_domain(self, domain, data):
+    def _process_domain(self, domain, cert_info):
         """Process domain."""
         try:
-            result = conditional_get_ocsp_response_for_certificate(data['cert'], data['chain'], data['rootchain'],
-                                                                   os.path.join(self.ocsp_folder, data['ocsp']),
+            result = conditional_get_ocsp_response_for_certificate(cert_info,
                                                                    self.min_validity, self.min_validity_pc,
                                                                    make_backups=self.make_backups,
                                                                    output_message=lambda msg: self.output(msg, domain=domain),
