@@ -1,6 +1,9 @@
-New in master
+New in v0.9.3
 =============
 
+Release on Spetember 16, 2018
+
+* Added support for OpenSSL 1.1.1 (or in general versions without letter).
 * Allows to specify OCSP responder URI
   (see [Recommendation 9](https://gist.github.com/sleevi/5efe9ef98961ecfb4da8))
 

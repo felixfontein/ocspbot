@@ -12,7 +12,7 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
 
 setup(
     name='ocspbot',
-    version='0.9.2',
+    version='0.9.3',
     description='Ensure up-to-date OCSP responses for certificates are available.',
     long_description=long_description,
     url='https://github.com/felixfontein/ocspbot',
