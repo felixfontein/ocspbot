@@ -1,0 +1,8 @@
+Make sure 'wheel', 'twine' and 'tox' are installed. Then run:
+
+    rm -rf .tox
+    tox
+
+    python setup.py sdist bdist_wheel
+
+    twine upload dist/*
