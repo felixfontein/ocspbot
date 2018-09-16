@@ -66,7 +66,7 @@ def _run_openssl(args, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, input=None, 
 
 def _get_openssl_version(executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME):
     version_string = _run_openssl(['version'], executable=executable).decode('utf-8')
-    m = re.match(r'^OpenSSL (\d+)\.(\d+)\.(\d+)([a-z]+)\s+', version_string)
+    m = re.match(r'^OpenSSL (\d+)\.(\d+)\.(\d+)([a-z]*)\s+', version_string)
     if not m:
         raise Exception("Cannot identify OpenSSL version from version string '{0}'!".format(version_string))
     return (int(m[1]), int(m[2]), int(m[3]), m[4])
