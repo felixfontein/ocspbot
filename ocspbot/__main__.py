@@ -42,6 +42,7 @@ except ImportError:  # Python 2
 try:
     FileNotFoundError
 except NameError:
+    # pylint: disable=redefined-builtin
     FileNotFoundError = IOError
 
 VERSION = "0.9.2"
@@ -51,14 +52,14 @@ _DEFAULT_OPENSSL_VERSION = (1, 0, 1, 'a')
 _OPENSSL_VERSION_1_1_0 = (1, 1, 0, '')
 
 
-def _run_openssl(args, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, input=None, return_stderr_and_returncode=False):
-    """Execute OpenSSL with the given arguments. Feeds input via stdin if given."""
-    if input is None:
+def _run_openssl(args, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, input_data=None, return_stderr_and_returncode=False):
+    """Execute OpenSSL with the given arguments. Feeds input_data via stdin if given."""
+    if input_data is None:
         proc = subprocess.Popen([executable] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = proc.communicate()
     else:
         proc = subprocess.Popen([executable] + list(args), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = proc.communicate(input)
+        out, err = proc.communicate(input_data)
     if proc.returncode != 0 and not return_stderr_and_returncode:
         raise IOError("OpenSSL Error: {0}\n(args: {1})".format(err.decode('utf-8'), args))
     return (out, err.decode('utf-8'), proc.returncode) if return_stderr_and_returncode else out
@@ -74,8 +75,9 @@ def _get_openssl_version(executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME):
 
 def _get_ocsp_uri(cert, executable=_DEFAULT_OPENSSL_EXECUTABLE_NAME, openssl_version=_DEFAULT_OPENSSL_VERSION):
     """Retrieve the OCSP URL from a certificate. Must be given as path on disk."""
+    _ = openssl_version
     cert_data = _run_openssl(['x509', '-in', cert, '-text'], executable=executable).decode('utf-8')
-    m = re.search('^\s*OCSP - URI:(.*)$', cert_data, flags=re.MULTILINE)
+    m = re.search(r'^\s*OCSP - URI:(.*)$', cert_data, flags=re.MULTILINE)
     if m is None:
         raise Exception('Cannot find OCSP responder URI in certificate {cert}!'.format(cert=cert))
     return m.group(1).strip()
@@ -115,6 +117,7 @@ def _verify_ocsp_response(cert, chain, rootchain, output, executable=_DEFAULT_OP
     ``cert`` and ``chain`` must point to files on disk which contain the certificate
     respectively the certificate chain. ``rootchain`` must point to the root certificate's chain.
     """
+    _ = openssl_version
     out, err, returncode = _run_openssl(['ocsp', '-no_nonce', '-respin', output, '-issuer', chain, '-CAfile', rootchain, '-VAfile', rootchain, '-cert', cert], return_stderr_and_returncode=True, executable=executable)
     if returncode != 0 or ' ERROR: ' in err:
         return False, err
@@ -126,7 +129,7 @@ def _verify_ocsp_response(cert, chain, rootchain, output, executable=_DEFAULT_OP
 
 def _parse_openssl_text(text, data_type='Data', data_name='data'):
     """Parse OpenSSL text certificate entry."""
-    m = re.search('^\s*{0}(.*)$'.format(re.escape(data_type)), text, flags=re.MULTILINE)
+    m = re.search(r'^\s*{0}(.*)$'.format(re.escape(data_type)), text, flags=re.MULTILINE)
     if m is None:
         raise Exception('Cannot find "{data_type}" in {data_name}!'.format(data_name=data_name, data_type=data_type))
     return m.group(1).strip()
@@ -138,7 +141,7 @@ def _parse_openssl_text_timestamp(text, timestamp_type='timestamp', data_name='d
     date_format = '%b %d %H:%M:%S %Y %Z'
     try:
         return datetime.datetime.strptime(timestamp, date_format)
-    except:
+    except Exception as _:
         raise Exception('Cannot parse "{timestamp_type}" in {data_name}!'.format(data_name=data_name, timestamp_type=timestamp_type))
 
 
@@ -405,6 +408,16 @@ class OCSPRenewal(object):
         As soon as the object is constructed, ``close()`` must be called to make sure
         all open files are closed.
         """
+        self.ocsp_folder = ''
+        self.min_validity = None
+        self.min_validity_pc = 0.5
+        self.threads = 1
+        self.stop_on_error = False
+        self.make_backups = False
+        self.openssl_executable = _DEFAULT_OPENSSL_EXECUTABLE_NAME
+        self.domains = {}
+        self.openssl_version = None
+
         # Load config
         try:
             with open(filename, "r") as f:
@@ -425,7 +438,7 @@ class OCSPRenewal(object):
                 self.error_file = self._open_file(self.raw_config['error_log'])
             else:
                 self.error_file = sys.stderr
-        except:
+        except Exception as _:
             self.close()
             raise
 
@@ -434,7 +447,7 @@ class OCSPRenewal(object):
         for f in self.open_files.values():
             try:
                 f.close()
-            except:
+            except Exception as _:  # pylint: disable=broad-except
                 pass
 
     def _scan_certs(self, folder, cert_mask, chain_mask, rootchain_mask, ocsp_mask, recursive=True):
@@ -490,7 +503,7 @@ class OCSPRenewal(object):
             datetime.timedelta(weeks=1): {'w', 'week', 'weeks'},
         }
         parts = text.split(' ')
-        while len(parts) > 0:
+        while parts:
             part = parts.pop(0)
             found = False
             for delta, endings in parse_interval_data.items():
@@ -502,7 +515,7 @@ class OCSPRenewal(object):
                             result += delta * v
                             found = True
                             break
-                        except:
+                        except ValueError as _:
                             pass
                 if found:
                     break
@@ -515,7 +528,7 @@ class OCSPRenewal(object):
                             result += v * delta
                             found = True
                             break
-                except:
+                except ValueError as _:
                     pass
             if not found:
                 raise Exception('Cannot interpret time interval "{0}"!'.format(part))
@@ -634,7 +647,7 @@ class OCSPRenewal(object):
                                 raise Exception('Error while reading included config file "{0}": {1}'.format(include_fn, e))
             except FileNotFoundError:
                 self.warning('Cannot find include file "{0}"!'.format(include))
-            except OSError as e:
+            except OSError as e:  # pylint: disable=duplicate-except
                 raise Exception('Error while listing files in include "{0}". ({1})'.format(include, e))
 
         # Determine OpenSSL version
@@ -682,7 +695,7 @@ class OCSPRenewal(object):
                                                                    executable=self.openssl_executable,
                                                                    openssl_version=self.openssl_version)
             return 'updated' if result else 'unchanged'
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self.error(e, domain=domain)
             return 'failure'
 
@@ -692,6 +705,7 @@ class OCSPRenewal(object):
         Return ``True`` in case everything went well, and ``False`` otherwise.
         """
         def process(domain_data):
+            """Internal helper to process one domain."""
             return self._process_domain(domain_data[0], domain_data[1])
 
         success = True
@@ -762,7 +776,7 @@ def main(executable, arguments):
             print("OCSP Bot {version}".format(version=VERSION))
             return 0
     config_filename = "ocspbot.yaml"
-    if len(arguments) > 0:
+    if arguments:
         if len(arguments) > 1:
             print('ERROR: invalid number of arguments')
             print(_HELP_TEXT.format(executable=executable, version=VERSION))
@@ -771,15 +785,15 @@ def main(executable, arguments):
     # Load and parse config
     try:
         parsed_config = OCSPRenewal(config_filename)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         sys.stderr.write('ERROR: {exception}\n'.format(exception=e))
         return -2
     try:
         try:
             parsed_config.parse()
-            success, unchanged_count, updated_count, failed_count = parsed_config.process()
+            success, _, updated_count, _ = parsed_config.process()
             return updated_count if success else -1
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             parsed_config.error(e)
             return -3
     finally:
